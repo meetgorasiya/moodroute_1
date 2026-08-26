@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="description" content="MoodRoute - Find walking routes tailored to your emotional state">
+    <title>MoodRoute — Walk Your Mood</title>
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet">
+
+    <!-- Leaflet.js -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+    <!-- App Styles -->
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+
+    <!-- Full-screen Map (sits behind everything) -->
+    <div id="map"></div>
+
+    <!-- Floating Top Bar -->
+    <header class="top-bar">
+        <div class="top-bar__logo">
+            <svg class="top-bar__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 2C8 2 4 6 4 10c0 6 8 12 8 12s8-6 8-12c0-4-4-8-8-8z"/>
+                <circle cx="12" cy="10" r="3"/>
+            </svg>
+            <span class="top-bar__title">MoodRoute</span>
+        </div>
+        <div class="weather-pill" id="weatherPill">
+            <span class="weather-pill__icon" id="weatherIcon">☀️</span>
+            <span class="weather-pill__temp" id="weatherTemp">--°C</span>
+        </div>
+    </header>
+
+    <!-- Hero Banner -->
+    <div class="hero-banner">
+        <h1 class="hero-banner__title">Walk your way to feeling better</h1>
+        <p class="hero-banner__subtitle">Tell us how you're feeling and we'll find the perfect walking route near you — using AI mood detection and real environmental data.</p>
+    </div>
+
+    <!-- ─────────────────────────────────────────────────────────────────── -->
+    <!--  DRAGGABLE FLOATING PANEL                                           -->
+    <!--  Drag the title-bar to move it to any corner of the screen.        -->
+    <!-- ─────────────────────────────────────────────────────────────────── -->
+    <div class="panel" id="panel">
+
+        <!-- Panel title bar — drag handle -->
+        <div class="panel__titlebar" id="panelTitlebar">
+            <span class="panel__title">🌿 How are you feeling?</span>
+            <div class="panel__titlebar-controls">
+                <!-- Minimise / restore toggle -->
+                <button class="panel__toggle-btn" id="panelToggleBtn" title="Minimise / Restore" aria-label="Minimise or restore panel">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="14" height="14">
+                        <path d="M19 9l-7 7-7-7"/>
+                    </svg>
+                </button>
+            </div>
+        </div>
+
+        <!-- Panel Body (collapsible) -->
+        <div class="panel__body" id="panelBody">
+
+            <!-- ── MOOD INPUT SECTION ── -->
+            <section class="mood-section" id="moodSection">
+                <textarea
+                    class="mood-input"
+                    id="moodInput"
+                    placeholder="Describe your mood... e.g. 'I'm feeling overwhelmed and need some peace'"
+                    maxlength="300"
+                    rows="3"
+                    aria-label="Describe your mood"
+                ></textarea>
+
+                <p class="mood-pills__label">Or tap a mood:</p>
+                <div class="mood-pills" id="moodPills">
+                    <button class="mood-pill" data-mood="stressed"  type="button">😰 Stressed</button>
+                    <button class="mood-pill" data-mood="anxious"   type="button">😟 Anxious</button>
+                    <button class="mood-pill" data-mood="tired"     type="button">😴 Tired</button>
+                    <button class="mood-pill" data-mood="sad"       type="button">😢 Sad</button>
+                    <button class="mood-pill" data-mood="happy"     type="button">😊 Happy</button>
+                    <button class="mood-pill" data-mood="energetic" type="button">⚡ Energetic</button>
+                </div>
+
+                <!-- Location row -->
+                <div class="location-row">
+                    <div class="location-input-wrap">
+                        <svg class="location-input__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/>
+                            <circle cx="12" cy="10" r="3"/>
+                        </svg>
+                        <input type="text" class="location-input" id="locationInput"
+                               placeholder="Enter location or use GPS" aria-label="Location">
+                    </div>
+                    <button class="gps-btn" id="gpsBtn" type="button" aria-label="Use my location">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="3"/>
+                            <path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>
+                        </svg>
+                    </button>
+                </div>
+
+                <button class="find-btn" id="findBtn" type="button">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polygon points="3 11 22 2 13 21 11 13 3 11"/>
+                    </svg>
+                    Find My Route
+                </button>
+            </section>
+
+            <!-- ── RESULT SECTION ── -->
+            <section class="result-section hidden" id="resultSection">
+                <div class="result-card">
+                    <div class="result-card__header">
+                        <span class="mood-badge" id="moodBadge">😊 Happy</span>
+                        <span class="confidence-badge" id="confidenceBadge">95%</span>
+                    </div>
+                    <h3 class="result-card__route-name" id="routeName">Route Name</h3>
+                    <div class="result-card__meta">
+                        <span class="result-meta__item" id="routeDistance">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+                            -- km
+                        </span>
+                        <span class="result-meta__item" id="routeTime">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+                            -- min
+                        </span>
+                    </div>
+
+                    <!-- Start / End points -->
+                    <div class="route-points" id="routePoints">
+                        <div class="route-point">
+                            <span class="route-point__marker route-point__marker--start">●</span>
+                            <span class="route-point__text">Start</span>
+                        </div>
+                        <div class="route-point__line"></div>
+                        <div class="route-point">
+                            <span class="route-point__marker route-point__marker--end">●</span>
+                            <span class="route-point__text">End</span>
+                        </div>
+                    </div>
+
+                    <!-- Score bars -->
+                    <div class="score-bars" id="scoreBars">
+                        <div class="score-bar">
+                            <div class="score-bar__label">
+                                <span>🌳 Greenery</span>
+                                <span class="score-bar__value" data-score="greenery">0%</span>
+                            </div>
+                            <div class="score-bar__track"><div class="score-bar__fill score-bar__fill--greenery" data-bar="greenery"></div></div>
+                        </div>
+                        <div class="score-bar">
+                            <div class="score-bar__label">
+                                <span>🔇 Quietness</span>
+                                <span class="score-bar__value" data-score="quiet">0%</span>
+                            </div>
+                            <div class="score-bar__track"><div class="score-bar__fill score-bar__fill--quiet" data-bar="quiet"></div></div>
+                        </div>
+                        <div class="score-bar">
+                            <div class="score-bar__label">
+                                <span>🏔️ Flatness</span>
+                                <span class="score-bar__value" data-score="flat">0%</span>
+                            </div>
+                            <div class="score-bar__track"><div class="score-bar__fill score-bar__fill--flat" data-bar="flat"></div></div>
+                        </div>
+                        <div class="score-bar">
+                            <div class="score-bar__label">
+                                <span>👤 Uncrowded</span>
+                                <span class="score-bar__value" data-score="uncrowded">0%</span>
+                            </div>
+                            <div class="score-bar__track"><div class="score-bar__fill score-bar__fill--uncrowded" data-bar="uncrowded"></div></div>
+                        </div>
+                    </div>
+
+                    <p class="result-card__explanation" id="routeExplanation"></p>
+
+                    <!-- Star rating -->
+                    <div class="star-rating" id="starRating">
+                        <span class="star-rating__label">Rate this walk:</span>
+                        <div class="star-rating__stars">
+                            <button class="star" data-star="1" type="button" aria-label="1 star">★</button>
+                            <button class="star" data-star="2" type="button" aria-label="2 stars">★</button>
+                            <button class="star" data-star="3" type="button" aria-label="3 stars">★</button>
+                            <button class="star" data-star="4" type="button" aria-label="4 stars">★</button>
+                            <button class="star" data-star="5" type="button" aria-label="5 stars">★</button>
+                        </div>
+                    </div>
+                </div>
+                <button class="find-btn find-btn--secondary" id="newRouteBtn" type="button">← Try Different Mood</button>
+            </section>
+
+            <!-- ── INDOOR ALTERNATIVES SECTION ── -->
+            <section class="indoor-section hidden" id="indoorSection">
+                <div class="indoor-card">
+                    <div class="indoor-card__header">
+                        <span class="indoor-card__icon">🏠</span>
+                        <h3 class="indoor-card__title">Indoor Alternatives</h3>
+                    </div>
+                    <p class="indoor-card__reason" id="indoorReason">Weather conditions aren't ideal for walking.</p>
+                    <ul class="indoor-card__list" id="indoorList"></ul>
+                </div>
+                <button class="find-btn find-btn--secondary" id="indoorBackBtn" type="button">← Try Different Mood</button>
+            </section>
+
+            <!-- Footer -->
+            <footer class="sheet-footer">
+                <div class="security-badge">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13">
+                        <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                        <path d="M7 11V7a5 5 0 0110 0v4"/>
+                    </svg>
+                    Your data is never stored
+                </div>
+
+            </footer>
+        </div><!-- /panel__body -->
+    </div><!-- /panel -->
+
+    <!-- Loading Overlay -->
+    <div class="loading-overlay hidden" id="loadingOverlay">
+        <div class="loading-card">
+            <div class="loading-spinner"></div>
+            <p class="loading-text" id="loadingText">Analysing mood...</p>
+            <div class="loading-steps">
+                <div class="loading-step active" data-step="1">Analysing mood</div>
+                <div class="loading-step" data-step="2">Checking weather</div>
+                <div class="loading-step" data-step="3">Scoring routes</div>
+                <div class="loading-step" data-step="4">Finding best match</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast -->
+    <div class="toast hidden" id="toast">
+        <span class="toast__message" id="toastMessage"></span>
+    </div>
+
+    <script src="/static/js/map.js"></script>
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
