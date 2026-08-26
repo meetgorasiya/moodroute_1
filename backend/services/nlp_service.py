@@ -2,13 +2,24 @@
 
 Classifies text into 7 emotions then maps to MoodRoute categories.
 Falls back to keyword-based detection when the model is unavailable.
+
+Production behaviour on Render (no local cache, TRANSFORMERS_OFFLINE=1):
+  - _load_model() detects offline mode immediately
+  - Falls back to keyword detector in <1ms, never times out
+  - No network calls, no gunicorn worker timeout
+
+Local behaviour (model cached in ~/.cache/huggingface/):
+  - Loads from disk, no download
+  - Full transformer inference available
 """
+import os
 import re
 
 
 class MoodDetector:
     _instance = None
     _classifier = None
+    # None = not yet attempted, True = loaded, False = permanently unavailable
     _model_available = None
 
     def __new__(cls):
@@ -16,82 +27,95 @@ class MoodDetector:
             cls._instance = super().__new__(cls)
         return cls._instance
 
+    # ── Public entry point ────────────────────────────────────────────────────
+
+    def initialize(self):
+        """Call this once at application startup (before gunicorn forks workers).
+        
+        Safe to call multiple times — only runs once due to the class-level guard.
+        """
+        self._load_model()
+
+    def detect(self, mood_text: str) -> dict:
+        """Detect mood from text. Uses transformer model if available, else keywords."""
+        if self._model_available is None:
+            # Not yet attempted in this process — load now (first request path)
+            self._load_model()
+
+        if self._model_available and self._classifier is not None:
+            print('[NLP] Inference started')
+            return self._detect_with_model(mood_text)
+        else:
+            return self._detect_with_keywords(mood_text)
+
+    # ── Model loading ─────────────────────────────────────────────────────────
+
     def _load_model(self):
-        # Already determined — don't retry regardless of outcome
+        """Attempt to load the distilRoBERTa model.
+
+        Production safety rules:
+          1. If TRANSFORMERS_OFFLINE=1 is set, skip immediately (no network calls).
+          2. If model is not in local cache, skip immediately (no download attempt).
+          3. Only load from disk — never trigger a download during this call.
+          4. Once determined (True or False), never attempt again in this process.
+        """
+        # Guard: already determined in this process
         if self._model_available is not None:
             return
 
-        if self._classifier is not None:
+        print('[NLP] Initializing model...')
+
+        # Rule 1: Respect TRANSFORMERS_OFFLINE — skip without any network attempt
+        if os.environ.get('TRANSFORMERS_OFFLINE', '0') == '1':
+            print('[NLP] TRANSFORMERS_OFFLINE=1 — using keyword fallback.')
+            MoodDetector._model_available = False
+            self._model_available = False
             return
 
+        # Rule 2: Only load if the model is already cached locally
+        if not self._is_model_cached():
+            print('[NLP] Model not in local cache — using keyword fallback.')
+            print('[NLP] To enable the transformer model, run:')
+            print('[NLP]   python3 -c "from transformers import pipeline; pipeline(\'text-classification\', model=\'j-hartmann/emotion-english-distilroberta-base\', top_k=None)"')
+            MoodDetector._model_available = False
+            self._model_available = False
+            return
+
+        # Rule 3: Load from disk only — local_files_only=True prevents any download
         try:
-            print('[NLP] Attempting to load distilRoBERTa emotion model...')
-
-            # Disable all HuggingFace network retries before importing.
-            # Without this, the library retries 5 times with 1+2+4+8+8s backoff
-            # (~23 seconds minimum) before giving up when the network is unavailable.
-            import os
-            os.environ['HF_HUB_DISABLE_PROGRESS_BARS'] = '1'
-
-            # Monkey-patch huggingface_hub to use zero retries so failure is instant
-            try:
-                import huggingface_hub.file_download as hf_fd
-                hf_fd._DEFAULT_RETRIES = 0
-            except Exception:
-                pass
-
-            try:
-                from huggingface_hub.utils._http import hf_raise_for_status
-            except Exception:
-                pass
-
-            # Set a short network timeout so we don't wait long if the hub is unreachable
-            import huggingface_hub
-            if hasattr(huggingface_hub, 'constants'):
-                try:
-                    huggingface_hub.constants.HF_HUB_DOWNLOAD_TIMEOUT = 5
-                except Exception:
-                    pass
-
             from transformers import pipeline
+
             self._classifier = pipeline(
                 'text-classification',
                 model='j-hartmann/emotion-english-distilroberta-base',
                 top_k=None,
-                device=-1,
-                # Use local cache only if available, don't block waiting for download
-                local_files_only=not self._is_model_cached(),
+                device=-1,            # CPU only
+                local_files_only=True # Never download — fail fast if not cached
             )
             MoodDetector._model_available = True
             self._model_available = True
-            print('[NLP] ✓ distilRoBERTa model loaded successfully.')
+            print('[NLP] Model loaded successfully')
 
         except Exception as load_error:
-            # Permanently mark as unavailable on both instance and class level.
-            # Setting on the class ensures even new instances skip the load attempt.
             MoodDetector._model_available = False
             self._model_available = False
-            print(f'[NLP] Model unavailable ({type(load_error).__name__}). Using keyword fallback for all requests.')
+            print(f'[NLP] Initialization failed: {type(load_error).__name__}: {load_error}')
+            print('[NLP] Using keyword fallback for all requests.')
 
     def _is_model_cached(self) -> bool:
-        """Check if the distilRoBERTa model is already downloaded locally."""
-        import os
+        """Return True only if the model files exist in the local HuggingFace cache."""
         cache_dir = os.path.expanduser('~/.cache/huggingface/hub')
         if not os.path.exists(cache_dir):
             return False
-        for entry in os.listdir(cache_dir):
-            if 'distilroberta' in entry.lower() or 'hartmann' in entry.lower():
-                return True
+        try:
+            for entry in os.listdir(cache_dir):
+                if 'distilroberta' in entry.lower() or 'hartmann' in entry.lower():
+                    return True
+        except OSError:
+            pass
         return False
 
-    def detect(self, mood_text: str) -> dict:
-        """Detect mood from text input. Returns emotion, category, confidence, and scores."""
-        self._load_model()
-
-        if self._model_available and self._classifier is not None:
-            return self._detect_with_model(mood_text)
-        else:
-            return self._detect_with_keywords(mood_text)
+    # ── Transformer inference ─────────────────────────────────────────────────
 
     def _detect_with_model(self, mood_text: str) -> dict:
         """Use HuggingFace distilRoBERTa for emotion detection."""
@@ -100,8 +124,10 @@ class MoodDetector:
 
         top_emotion = classifier_results[0]['label']
         confidence = classifier_results[0]['score']
-        all_emotion_scores = {result['label']: round(result['score'], 4) for result in classifier_results}
-
+        all_emotion_scores = {
+            result['label']: round(result['score'], 4)
+            for result in classifier_results
+        }
         mood_category = self._map_emotion_to_mood(top_emotion, all_emotion_scores)
 
         return {
@@ -113,15 +139,17 @@ class MoodDetector:
             'method': 'distilRoBERTa'
         }
 
+    # ── Keyword fallback ──────────────────────────────────────────────────────
+
     def _detect_with_keywords(self, mood_text: str) -> dict:
-        """Keyword-based mood detection as fallback when model is unavailable."""
+        """Keyword-based mood detection used when transformer model is unavailable."""
         lowered_text = mood_text.lower().strip()
 
         emotion_keywords = {
             'anger': {
                 'angry': 2, 'furious': 3, 'frustrated': 2, 'irritated': 2,
                 'annoyed': 2, 'rage': 3, 'mad': 2, 'pissed': 3,
-                'hate': 2, 'fed up': 2, 'can\'t stand': 2
+                'hate': 2, 'fed up': 2, "can't stand": 2
             },
             'disgust': {
                 'disgusted': 3, 'gross': 2, 'sick of': 2, 'revolting': 3,
@@ -149,51 +177,45 @@ class MoodDetector:
             },
             'surprise': {
                 'surprised': 3, 'shocked': 3, 'amazed': 2, 'astonished': 3,
-                'unexpected': 2, 'wow': 2, 'unbelievable': 2, 'can\'t believe': 2
+                'unexpected': 2, 'wow': 2, 'unbelievable': 2, "can't believe": 2
             },
             'neutral': {}
         }
 
         stress_keywords = {
             'stressed': 3, 'overwhelmed': 3, 'pressure': 2, 'deadline': 2,
-            'too much': 2, 'can\'t cope': 3, 'burnt out': 3, 'overworked': 3,
+            'too much': 2, "can't cope": 3, 'burnt out': 3, 'overworked': 3,
             'swamped': 2, 'drowning': 2, 'assignment': 1, 'exam': 1
         }
-
         tired_keywords = {
             'tired': 3, 'exhausted': 3, 'fatigue': 3, 'sleepy': 2,
             'drained': 3, 'no energy': 3, 'worn out': 3, 'lethargy': 3,
             'sluggish': 2, 'weary': 2, 'knackered': 3
         }
-
         energetic_keywords = {
             'energetic': 3, 'pumped': 3, 'motivated': 3, 'ready': 1,
-            'active': 2, 'strong': 2, 'fired up': 3, 'let\'s go': 3,
+            'active': 2, 'strong': 2, 'fired up': 3, "let's go": 3,
             'enthusiastic': 3, 'alive': 2, 'vibrant': 2, 'buzzing': 2
         }
 
-        emotion_scores = {emotion: 0 for emotion in emotion_keywords.keys()}
+        emotion_scores = {emotion: 0 for emotion in emotion_keywords}
         emotion_scores['stressed_compound'] = 0
         emotion_scores['tired_compound'] = 0
         emotion_scores['energetic_compound'] = 0
 
         negation_patterns = [
-            r'\bnot\s+', r'\bdon\'t\s+', r'\bdont\s+', r'\bno\s+',
+            r'\bnot\s+', r"\bdon't\s+", r'\bdont\s+', r'\bno\s+',
             r'\bnever\s+', r'\bwithout\s+', r'\bhardly\s+'
         ]
 
         for emotion, keywords in emotion_keywords.items():
             for keyword, weight in keywords.items():
                 if keyword in lowered_text:
-                    is_negated = False
-                    for negation_pattern in negation_patterns:
-                        if re.search(negation_pattern + re.escape(keyword), lowered_text):
-                            is_negated = True
-                            break
-                    if is_negated:
-                        emotion_scores[emotion] -= weight
-                    else:
-                        emotion_scores[emotion] += weight
+                    is_negated = any(
+                        re.search(pat + re.escape(keyword), lowered_text)
+                        for pat in negation_patterns
+                    )
+                    emotion_scores[emotion] += (-weight if is_negated else weight)
 
         for keyword, weight in stress_keywords.items():
             if keyword in lowered_text:
@@ -205,43 +227,37 @@ class MoodDetector:
             if keyword in lowered_text:
                 emotion_scores['energetic_compound'] += weight
 
-        # Compound moods take priority if strong enough
         if emotion_scores['stressed_compound'] >= 3:
-            detected_emotion = 'anger'
-            mood_category = 'stressed'
+            detected_emotion, mood_category = 'anger', 'stressed'
             top_score = emotion_scores['stressed_compound']
         elif emotion_scores['tired_compound'] >= 3:
-            detected_emotion = 'neutral'
-            mood_category = 'tired'
+            detected_emotion, mood_category = 'neutral', 'tired'
             top_score = emotion_scores['tired_compound']
         elif emotion_scores['energetic_compound'] >= 3:
-            detected_emotion = 'surprise'
-            mood_category = 'energetic'
+            detected_emotion, mood_category = 'surprise', 'energetic'
             top_score = emotion_scores['energetic_compound']
         else:
-            base_emotion_scores = {emotion: score for emotion, score in emotion_scores.items()
-                                   if emotion in emotion_keywords and emotion != 'neutral'}
-            if any(score > 0 for score in base_emotion_scores.values()):
-                detected_emotion = max(base_emotion_scores, key=base_emotion_scores.get)
-                top_score = base_emotion_scores[detected_emotion]
+            base = {e: s for e, s in emotion_scores.items()
+                    if e in emotion_keywords and e != 'neutral'}
+            if any(s > 0 for s in base.values()):
+                detected_emotion = max(base, key=base.get)
+                top_score = base[detected_emotion]
             else:
-                detected_emotion = 'neutral'
-                top_score = 1
+                detected_emotion, top_score = 'neutral', 1
 
             mood_category = self._map_emotion_to_mood(
                 detected_emotion,
-                {emotion: max(0, score) / max(1, sum(max(0, s) for s in emotion_scores.values()))
-                 for emotion, score in emotion_scores.items() if emotion in emotion_keywords}
+                {e: max(0, s) / max(1, sum(max(0, x) for x in emotion_scores.values()))
+                 for e, s in emotion_scores.items() if e in emotion_keywords}
             )
 
-        total_weight = sum(max(0, score) for score in emotion_scores.values()) + 1
+        total_weight = sum(max(0, s) for s in emotion_scores.values()) + 1
         confidence = min(0.85, 0.45 + (top_score / total_weight) * 0.4)
 
-        all_emotions = ['anger', 'disgust', 'fear', 'joy', 'neutral', 'sadness', 'surprise']
-        all_emotion_scores = {}
-        for emotion_name in all_emotions:
-            raw_score = max(0, emotion_scores.get(emotion_name, 0))
-            all_emotion_scores[emotion_name] = round(raw_score / max(1, total_weight), 4)
+        all_emotion_scores = {
+            e: round(max(0, emotion_scores.get(e, 0)) / max(1, total_weight), 4)
+            for e in ['anger', 'disgust', 'fear', 'joy', 'neutral', 'sadness', 'surprise']
+        }
 
         return {
             'detected_emotion': detected_emotion,
@@ -252,41 +268,29 @@ class MoodDetector:
             'method': 'keyword_fallback'
         }
 
+    # ── Emotion mapping ───────────────────────────────────────────────────────
+
     def _map_emotion_to_mood(self, emotion: str, scores: dict) -> str:
-        """Map distilRoBERTa emotions to MoodRoute mood categories.
-        
-        Handles compound emotions (e.g. sadness + anger = stressed)
-        and low-affect states (neutral + slight sadness = tired).
-        """
         if scores.get('sadness', 0) > 0.25 and scores.get('anger', 0) > 0.2:
             return 'stressed'
-
         if emotion == 'neutral' and scores.get('sadness', 0) > 0.15:
             return 'tired'
-
         if emotion == 'neutral' and scores.get('joy', 0) > 0.15:
             return 'happy'
-
-        emotion_to_mood = {
-            'anger': 'stressed',
-            'disgust': 'stressed',
-            'fear': 'anxious',
-            'sadness': 'sad',
-            'joy': 'happy',
-            'surprise': 'energetic',
+        return {
+            'anger': 'stressed', 'disgust': 'stressed',
+            'fear': 'anxious',   'sadness': 'sad',
+            'joy': 'happy',      'surprise': 'energetic',
             'neutral': 'neutral'
-        }
-
-        return emotion_to_mood.get(emotion, 'neutral')
+        }.get(emotion, 'neutral')
 
     def _get_mood_description(self, mood: str) -> str:
-        descriptions = {
-            'stressed': 'Quiet, green, and calming routes to help you decompress',
-            'anxious': 'Very quiet, secluded paths with minimal stimulation',
-            'tired': 'Short, flat, gentle walks to restore your energy',
-            'sad': 'Nature-rich uplifting routes to lift your spirits',
-            'happy': 'Scenic enjoyable routes to celebrate your mood',
+        return {
+            'stressed':  'Quiet, green, and calming routes to help you decompress',
+            'anxious':   'Very quiet, secluded paths with minimal stimulation',
+            'tired':     'Short, flat, gentle walks to restore your energy',
+            'sad':       'Nature-rich uplifting routes to lift your spirits',
+            'happy':     'Scenic enjoyable routes to celebrate your mood',
             'energetic': 'Long, challenging routes to channel your energy',
-            'neutral': 'Balanced, well-rounded walking routes'
-        }
-        return descriptions.get(mood, descriptions['neutral'])
+            'neutral':   'Balanced, well-rounded walking routes'
+        }.get(mood, 'Balanced, well-rounded walking routes')

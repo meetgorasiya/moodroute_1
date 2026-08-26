@@ -31,17 +31,11 @@ def create_app():
             'img-src':     ["'self'", 'data:', '*.tile.openstreetmap.org',
                             'nominatim.openstreetmap.org'],
             'connect-src': ["'self'",
-                            # Geocoding
                             'https://nominatim.openstreetmap.org',
-                            # Walking route geometry
                             'https://router.project-osrm.org',
-                            # Greenery and noise data
                             'https://overpass-api.de',
-                            # Elevation data
                             'https://api.open-elevation.com',
-                            # Weather data
                             'https://api.openweathermap.org',
-                            # Crowd density
                             'https://api.foursquare.com'],
         },
         content_security_policy_nonce_in=['script-src'],
@@ -62,16 +56,21 @@ def create_app():
     app.register_blueprint(route_bp, url_prefix='/api')
     app.register_blueprint(rating_bp, url_prefix='/api')
 
-    # Warm up the NLP model in a background thread immediately when the server starts.
-    # This means the model check (and any network timeout) happens once during startup
-    # rather than blocking the very first user request.
-    import threading
-    def warmup_nlp():
-        from backend.services.nlp_service import MoodDetector
-        detector = MoodDetector()
-        detector._load_model()
-
-    threading.Thread(target=warmup_nlp, daemon=True).start()
+    # Initialize the NLP model synchronously here, before gunicorn forks workers.
+    #
+    # Why synchronous instead of a background thread:
+    #   gunicorn uses fork() to create worker processes. Threads started before
+    #   the fork do NOT carry over into worker processes. If we use a thread,
+    #   the warmup runs in the master process but each forked worker starts with
+    #   _model_available = None and hits _load_model() on the first request.
+    #
+    # With TRANSFORMERS_OFFLINE=1 set on Render, this call returns in <1ms
+    # because it detects offline mode immediately and sets _model_available=False.
+    # No network calls, no timeout, no gunicorn worker kill.
+    #
+    # With the model cached locally (dev environment), this loads from disk.
+    from backend.services.nlp_service import MoodDetector
+    MoodDetector().initialize()
 
     @app.route('/')
     def index():
