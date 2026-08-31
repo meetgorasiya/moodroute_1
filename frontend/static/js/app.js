@@ -1,301 +1,153 @@
 /**
  * MoodRoute — Main Application Logic
+ * Sidebar + map layout matching original MoodRoute.html design.
+ * All route recommendations use real backend API calls.
  */
 
 const MoodRouteApp = {
-    currentLocation: { lat: -34.4054, lng: 150.8784 },
+
+    // ── State ────────────────────────────────────────────────────────────
+    currentLocation: { lat: -34.4054, lng: 150.8784 },  // UOW campus default
     selectedMood: null,
     currentWeather: null,
     currentRoute: null,
     isLoading: false,
 
-    pageElements: {},
-
+    // ── Init ─────────────────────────────────────────────────────────────
     start() {
-        this.findPageElements();
         MapManager.init();
         this.setupEventListeners();
-        this.setupDraggablePanel();
         this.loadWeather(this.currentLocation.lat, this.currentLocation.lng);
         MapManager.addUserMarker(this.currentLocation.lat, this.currentLocation.lng);
-
-        MapManager.addClickHandler((clickedCoords) => {
-            this.currentLocation.lat = clickedCoords.lat;
-            this.currentLocation.lng = clickedCoords.lng;
-            MapManager.addUserMarker(clickedCoords.lat, clickedCoords.lng);
-            this.pageElements.locationInput.value = `${clickedCoords.lat.toFixed(4)}, ${clickedCoords.lng.toFixed(4)}`;
-            this.loadWeather(clickedCoords.lat, clickedCoords.lng);
-        });
     },
 
-    findPageElements() {
-        this.pageElements = {
-            panel:           document.getElementById('panel'),
-            panelTitlebar:   document.getElementById('panelTitlebar'),
-            panelBody:       document.getElementById('panelBody'),
-            panelToggleBtn:  document.getElementById('panelToggleBtn'),
-            moodInput:       document.getElementById('moodInput'),
-            moodPills:       document.getElementById('moodPills'),
-            locationInput:   document.getElementById('locationInput'),
-            gpsBtn:          document.getElementById('gpsBtn'),
-            findBtn:         document.getElementById('findBtn'),
-            resultSection:   document.getElementById('resultSection'),
-            indoorSection:   document.getElementById('indoorSection'),
-            moodSection:     document.getElementById('moodSection'),
-            loadingOverlay:  document.getElementById('loadingOverlay'),
-            loadingText:     document.getElementById('loadingText'),
-            toast:           document.getElementById('toast'),
-            toastMessage:    document.getElementById('toastMessage'),
-            weatherPill:     document.getElementById('weatherPill'),
-            weatherIcon:     document.getElementById('weatherIcon'),
-            weatherTemp:     document.getElementById('weatherTemp'),
-            moodBadge:       document.getElementById('moodBadge'),
-            confidenceBadge: document.getElementById('confidenceBadge'),
-            routeName:       document.getElementById('routeName'),
-            routeDistance:   document.getElementById('routeDistance'),
-            routeTime:       document.getElementById('routeTime'),
-            routeExplanation:document.getElementById('routeExplanation'),
-            scoreBars:       document.getElementById('scoreBars'),
-            starRating:      document.getElementById('starRating'),
-            indoorReason:    document.getElementById('indoorReason'),
-            indoorList:      document.getElementById('indoorList'),
-            newRouteBtn:     document.getElementById('newRouteBtn'),
-            indoorBackBtn:   document.getElementById('indoorBackBtn')
-        };
-    },
-
+    // ── Event listeners ──────────────────────────────────────────────────
     setupEventListeners() {
-        this.pageElements.moodPills.addEventListener('click', (event) => {
-            const clickedPill = event.target.closest('.mood-pill');
-            if (clickedPill) {
-                this.selectMoodPill(clickedPill.dataset.mood, clickedPill);
-            }
+        // Mood pills
+        document.getElementById('moodPills').addEventListener('click', (e) => {
+            const pill = e.target.closest('.mood-pill');
+            if (pill) this.selectMoodPill(pill.dataset.mood, pill);
         });
 
-        this.pageElements.gpsBtn.addEventListener('click', () => this.requestGPSLocation());
-        this.pageElements.findBtn.addEventListener('click', () => this.findRoute());
+        // GPS button
+        document.getElementById('gpsBtn').addEventListener('click', () => this.requestGPSLocation());
 
-        this.pageElements.starRating.addEventListener('click', (event) => {
-            const clickedStar = event.target.closest('.star');
-            if (clickedStar) {
-                this.submitRating(parseInt(clickedStar.dataset.star, 10));
-            }
+        // Find route button
+        document.getElementById('findBtn').addEventListener('click', () => this.findRoute());
+
+        // Star rating
+        document.getElementById('stars').addEventListener('click', (e) => {
+            const star = e.target.closest('.star');
+            if (star) this.submitRating(parseInt(star.dataset.star, 10));
         });
 
-        this.pageElements.newRouteBtn.addEventListener('click', () => this.resetToMoodInput());
-        this.pageElements.indoorBackBtn.addEventListener('click', () => this.resetToMoodInput());
-
-        this.pageElements.locationInput.addEventListener('keydown', (event) => {
-            if (event.key === 'Enter') {
-                event.preventDefault();
-                this.geocodeAddress(this.pageElements.locationInput.value);
+        // Location input — geocode on Enter
+        document.getElementById('locationInput').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                this.geocodeAddress(document.getElementById('locationInput').value);
             }
-        });
-
-        this.pageElements.moodInput.addEventListener('focus', () => {
-            this.pageElements.panel.classList.remove('minimised');
         });
     },
 
-    setupDraggablePanel() {
-        const panel = this.pageElements.panel;
-        const titlebar = this.pageElements.panelTitlebar;
-        const toggleButton = this.pageElements.panelToggleBtn;
-
-        let isDragging = false;
-        let dragStartX = 0, dragStartY = 0;
-        let panelStartLeft = 0, panelStartTop = 0;
-
-        toggleButton.addEventListener('click', (event) => {
-            event.stopPropagation();
-            panel.classList.toggle('minimised');
-            MapManager.invalidateSize();
-        });
-
-        const onDragStart = (event) => {
-            if (event.target === toggleButton || toggleButton.contains(event.target)) return;
-
-            isDragging = true;
-            const clientX = event.touches ? event.touches[0].clientX : event.clientX;
-            const clientY = event.touches ? event.touches[0].clientY : event.clientY;
-
-            const panelRect = panel.getBoundingClientRect();
-            dragStartX = clientX;
-            dragStartY = clientY;
-            panelStartLeft = panelRect.left;
-            panelStartTop = panelRect.top;
-
-            panel.style.transition = 'none';
-            panel.style.bottom = 'auto';
-            panel.style.right = 'auto';
-            panel.style.left = `${panelRect.left}px`;
-            panel.style.top = `${panelRect.top}px`;
-
-            titlebar.style.cursor = 'grabbing';
-            event.preventDefault();
-        };
-
-        const onDragMove = (event) => {
-            if (!isDragging) return;
-            const clientX = event.touches ? event.touches[0].clientX : event.clientX;
-            const clientY = event.touches ? event.touches[0].clientY : event.clientY;
-
-            const deltaX = clientX - dragStartX;
-            const deltaY = clientY - dragStartY;
-
-            const newLeft = Math.max(0, Math.min(window.innerWidth - panel.offsetWidth, panelStartLeft + deltaX));
-            const newTop = Math.max(0, Math.min(window.innerHeight - panel.offsetHeight, panelStartTop + deltaY));
-
-            panel.style.left = `${newLeft}px`;
-            panel.style.top = `${newTop}px`;
-        };
-
-        const onDragEnd = () => {
-            if (!isDragging) return;
-            isDragging = false;
-            titlebar.style.cursor = 'grab';
-
-            const panelRect = panel.getBoundingClientRect();
-            const panelCenterX = panelRect.left + panelRect.width / 2;
-            const panelCenterY = panelRect.top + panelRect.height / 2;
-            const viewportWidth = window.innerWidth;
-            const viewportHeight = window.innerHeight;
-            const margin = 24;
-            const panelWidth = panel.offsetWidth;
-            const panelHeight = panel.offsetHeight;
-
-            const snapToLeft = panelCenterX < viewportWidth / 2;
-            const snapToTop = panelCenterY < viewportHeight / 2;
-
-            panel.style.transition = 'left 0.25s ease, top 0.25s ease, right 0.25s ease, bottom 0.25s ease';
-
-            if (snapToLeft && !snapToTop) {
-                panel.style.left = `${margin}px`;
-                panel.style.top = `${viewportHeight - panelHeight - margin}px`;
-            } else if (!snapToLeft && !snapToTop) {
-                panel.style.left = `${viewportWidth - panelWidth - margin}px`;
-                panel.style.top = `${viewportHeight - panelHeight - margin}px`;
-            } else if (snapToLeft && snapToTop) {
-                panel.style.left = `${margin}px`;
-                panel.style.top = `${margin + 56}px`;
-            } else {
-                panel.style.left = `${viewportWidth - panelWidth - margin}px`;
-                panel.style.top = `${margin + 56}px`;
-            }
-
-            MapManager.invalidateSize();
-        };
-
-        titlebar.addEventListener('touchstart', onDragStart, { passive: false });
-        document.addEventListener('touchmove', onDragMove, { passive: true });
-        document.addEventListener('touchend', onDragEnd);
-
-        titlebar.addEventListener('mousedown', onDragStart);
-        document.addEventListener('mousemove', onDragMove);
-        document.addEventListener('mouseup', onDragEnd);
-    },
-
-    setSheetState(state) {
-        const panel = this.pageElements.panel;
-        if (state === 'full' || state === 'half') {
-            panel.classList.remove('minimised');
-        }
-        MapManager.invalidateSize();
-    },
-
-    selectMoodPill(mood, pillElement) {
-        document.querySelectorAll('.mood-pill').forEach((pill) => {
-            pill.classList.remove('active');
-        });
-        pillElement.classList.add('active');
+    // ── Mood pill selection ──────────────────────────────────────────────
+    selectMoodPill(mood, element) {
+        document.querySelectorAll('.mood-pill').forEach(p => p.classList.remove('active'));
+        element.classList.add('active');
         this.selectedMood = mood;
     },
 
+    // ── GPS location ─────────────────────────────────────────────────────
     requestGPSLocation() {
         if (!navigator.geolocation) {
-            this.showToast('Geolocation is not supported by your browser', 'error');
+            this.showToast('Geolocation is not supported by your browser');
             return;
         }
 
-        this.pageElements.gpsBtn.classList.add('locating');
+        document.getElementById('gpsBtn').textContent = '📡 Locating...';
 
         navigator.geolocation.getCurrentPosition(
             (position) => {
-                const userLatitude = position.coords.latitude;
-                const userLongitude = position.coords.longitude;
-                this.currentLocation.lat = userLatitude;
-                this.currentLocation.lng = userLongitude;
-                this.pageElements.locationInput.value = `${userLatitude.toFixed(4)}, ${userLongitude.toFixed(4)}`;
-
-                MapManager.setView(userLatitude, userLongitude);
-                MapManager.addUserMarker(userLatitude, userLongitude);
-                this.loadWeather(userLatitude, userLongitude);
-                this.pageElements.gpsBtn.classList.remove('locating');
-                this.showToast('Location updated ✓');
+                const lat = position.coords.latitude;
+                const lng = position.coords.longitude;
+                this.currentLocation = { lat, lng };
+                document.getElementById('locationInput').value = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+                MapManager.setView(lat, lng);
+                MapManager.addUserMarker(lat, lng);
+                this.loadWeather(lat, lng);
+                document.getElementById('gpsBtn').textContent = '📡 Use GPS';
+                this.showToast('✅ Location updated!');
             },
-            (locationError) => {
-                this.pageElements.gpsBtn.classList.remove('locating');
-                let errorMessage = 'Unable to get location';
-                if (locationError.code === 1) errorMessage = 'Location access denied';
-                if (locationError.code === 2) errorMessage = 'Location unavailable';
-                if (locationError.code === 3) errorMessage = 'Location request timed out';
-                this.showToast(errorMessage, 'error');
+            (error) => {
+                document.getElementById('gpsBtn').textContent = '📡 Use GPS';
+                const messages = {
+                    1: 'Location access denied',
+                    2: 'Location unavailable',
+                    3: 'Location request timed out'
+                };
+                this.showToast(messages[error.code] || 'Unable to get location');
             },
             { enableHighAccuracy: true, timeout: 10000, maximumAge: 300000 }
         );
     },
 
-    async loadWeather(latitude, longitude) {
+    // ── Weather ──────────────────────────────────────────────────────────
+    async loadWeather(lat, lng) {
         try {
-            const response = await fetch(`/api/weather?lat=${latitude}&lng=${longitude}`);
+            const response = await fetch(`/api/weather?lat=${lat}&lng=${lng}`);
             if (!response.ok) throw new Error('Weather fetch failed');
-            const responseData = await response.json();
+            const data = await response.json();
 
-            const weatherData = responseData.weather || responseData;
-            this.currentWeather = weatherData;
+            // API returns { success: true, weather: { condition, temp, icon, walkable ... } }
+            const weather = data.weather || data;
+            this.currentWeather = weather;
 
-            const weatherIcon = weatherData.icon || '🌤️';
-            const temperature = weatherData.temp || 0;
+            const card = document.getElementById('weatherCard');
+            document.getElementById('weatherIcon').textContent = weather.icon || '🌤️';
+            document.getElementById('weatherMain').textContent =
+                `${weather.description || weather.condition} · ${Math.round(weather.temp || 0)}°C`;
+            document.getElementById('weatherSub').textContent =
+                weather.walkable === 'good'      ? `Wind: ${weather.wind || 0}km/h · ✅ Great for walking` :
+                weather.walkable === 'moderate'  ? `Wind: ${weather.wind || 0}km/h · ⚠️ Take an umbrella` :
+                weather.walkable === 'poor'      ? `Wind: ${weather.wind || 0}km/h · 🌧️ Consider indoors` :
+                                                   `Wind: ${weather.wind || 0}km/h · ⛈️ Stay indoors`;
 
-            this.pageElements.weatherIcon.textContent = weatherIcon;
-            this.pageElements.weatherTemp.textContent = `${Math.round(temperature)}°C`;
-        } catch (fetchError) {
-            console.warn('Weather load failed:', fetchError);
+            card.className = 'weather-card';
+            if (weather.walkable === 'moderate') card.classList.add('weather-alert');
+            if (weather.walkable === 'poor' || weather.walkable === 'dangerous') card.classList.add('weather-danger');
+
+        } catch (err) {
+            // Silently fail — weather not critical
         }
     },
 
+    // ── Main: find route ─────────────────────────────────────────────────
     async findRoute() {
-        const moodText = this.sanitizeInput(this.pageElements.moodInput.value.trim());
-        const chosenMood = this.selectedMood;
+        const moodText   = this.sanitizeInput(document.getElementById('moodInput').value.trim());
+        const selectedMood = this.selectedMood;
 
-        if (!moodText && !chosenMood) {
-            this.showToast('Please describe your mood or select one', 'error');
+        if (!moodText && !selectedMood) {
+            this.showToast('💬 Please type how you feel or select a mood');
             return;
         }
 
-        if (!this.currentLocation.lat || !this.currentLocation.lng) {
-            this.showToast('Please set your location', 'error');
-            return;
-        }
-
-        this.showLoading('Analysing mood...');
-        this.pageElements.findBtn.disabled = true;
+        this.showLoading('Analysing your mood...');
+        document.getElementById('findBtn').disabled = true;
 
         try {
             await this.animateLoadingSteps();
 
-            const requestPayload = {
+            const payload = {
                 lat: this.currentLocation.lat,
                 lng: this.currentLocation.lng
             };
-
-            if (moodText) requestPayload.text = moodText;
-            if (chosenMood) requestPayload.mood = chosenMood;
+            if (moodText)      payload.text = moodText;
+            if (selectedMood)  payload.mood = selectedMood;
 
             const response = await fetch('/api/find-route', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(requestPayload)
+                body: JSON.stringify(payload)
             });
 
             if (!response.ok) {
@@ -303,315 +155,265 @@ const MoodRouteApp = {
                 throw new Error(errorData.error || 'Route search failed');
             }
 
-            const routeData = await response.json();
+            const data = await response.json();
 
-            if (routeData.indoor_alternatives === true && routeData.alternatives) {
-                this.displayIndoorAlternatives(routeData);
-            } else if (routeData.routes && routeData.routes.length > 0) {
-                this.displayRouteResult(routeData);
+            if (data.indoor_alternatives === true && data.alternatives) {
+                this.displayIndoorAlternatives(data);
+            } else if (data.routes && data.routes.length > 0) {
+                this.displayRouteResult(data);
             } else {
-                this.showToast('No routes found near your location', 'error');
+                this.showToast('No routes found near your location');
             }
+
         } catch (routeError) {
-            console.error('Find route error:', routeError);
-            this.showToast(routeError.message || 'Something went wrong', 'error');
+            this.showToast(routeError.message || 'Something went wrong');
         } finally {
             this.hideLoading();
-            this.pageElements.findBtn.disabled = false;
+            document.getElementById('findBtn').disabled = false;
         }
     },
 
+    // ── Loading animation ────────────────────────────────────────────────
     async animateLoadingSteps() {
-        const steps = document.querySelectorAll('.loading-step');
-        const messages = [
-            'Analysing mood...',
-            'Checking weather...',
-            'Scoring routes...',
-            'Finding best match...'
+        const steps = [
+            '🧠 Detecting your mood with NLP...',
+            '🌿 Scanning nearby green spaces...',
+            '☁️ Checking weather conditions...',
+            '⛰️ Analysing terrain data...',
+            '🏆 Scoring and ranking routes...'
         ];
-
-        for (let stepIndex = 0; stepIndex < steps.length; stepIndex++) {
-            steps[stepIndex].classList.add('active');
-            this.pageElements.loadingText.textContent = messages[stepIndex];
-            if (stepIndex > 0) steps[stepIndex - 1].classList.remove('active');
-            if (stepIndex > 0) steps[stepIndex - 1].classList.add('done');
-            await this.delay(600);
+        for (const step of steps) {
+            document.getElementById('loadingStep').textContent = step;
+            await this.delay(500);
         }
-        steps[steps.length - 1].classList.remove('active');
-        steps[steps.length - 1].classList.add('done');
     },
 
-    displayRouteResult(responseData) {
-        const bestRoute = (responseData.routes && responseData.routes.length > 0) ? responseData.routes[0] : null;
-
+    // ── Display route result ─────────────────────────────────────────────
+    displayRouteResult(data) {
+        const bestRoute = (data.routes && data.routes.length > 0) ? data.routes[0] : null;
         if (!bestRoute) {
-            this.showToast('No suitable routes found nearby', 'error');
+            this.showToast('No suitable routes found nearby');
             return;
         }
 
         this.currentRoute = bestRoute;
 
-        const moodInfo = responseData.mood || {};
-        const moodLabel = moodInfo.category || moodInfo.label || this.selectedMood || 'unknown';
-        const moodEmoji = moodInfo.emoji || '🧠';
-        this.pageElements.moodBadge.textContent = `${moodEmoji} ${moodLabel.charAt(0).toUpperCase() + moodLabel.slice(1)}`;
+        // Hide indoor, show result
+        document.getElementById('indoorCard').classList.add('hidden');
+        document.getElementById('resultCard').classList.remove('hidden');
 
-        const confidenceText = moodInfo.confidence
-            ? `${Math.round(moodInfo.confidence * 100)}%`
-            : '--';
-        this.pageElements.confidenceBadge.textContent = confidenceText;
+        // Mood badge
+        const moodData = data.mood || {};
+        const emoji    = moodData.emoji || '🧠';
+        const label    = moodData.label || moodData.category || 'Unknown';
+        document.getElementById('resultMood').textContent = `${emoji} ${label}`;
 
-        this.pageElements.routeName.textContent = bestRoute.name || 'Recommended Route';
+        // Confidence bar
+        const confidence = moodData.confidence ? Math.round(moodData.confidence * 100) : 0;
+        document.getElementById('confidenceText').textContent = `${confidence}%`;
+        setTimeout(() => {
+            document.getElementById('confidenceFill').style.width = `${confidence}%`;
+        }, 100);
 
-        const distanceKm = bestRoute.distance_km || '--';
-        this.pageElements.routeDistance.innerHTML = `
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
-                <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
-            </svg>
-            ${distanceKm} km`;
+        // Route name
+        document.getElementById('routeName').textContent = bestRoute.name || 'Recommended Route';
 
-        const estimatedMinutes = Math.round((parseFloat(distanceKm) || 0) * 12);
-        this.pageElements.routeTime.innerHTML = `
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
-                <circle cx="12" cy="12" r="10"/>
-                <path d="M12 6v6l4 2"/>
-            </svg>
-            ${estimatedMinutes} min`;
+        // Meta tags: distance + time
+        const distKm  = bestRoute.distance_km || '--';
+        const timeMin = Math.round((parseFloat(distKm) || 0) * 12);
+        document.getElementById('routeMeta').innerHTML = `
+            <div class="route-tag">🚶 ${distKm} km</div>
+            <div class="route-tag">⏱️ ${timeMin} min</div>
+            <div class="route-tag">⭐ Score: ${bestRoute.total_score || '--'}/10</div>
+        `;
 
-        const startPointName = bestRoute.start_point || 'Start';
-        const endPointName = bestRoute.end_point || 'End';
+        // Start / End points
+        const startName = bestRoute.start_point || 'University of Wollongong';
+        const endName   = bestRoute.end_point   || 'Destination';
+        document.getElementById('routePoints').innerHTML = `
+            <div class="route-point">
+                <span class="route-point__marker route-point__marker--start">●</span>
+                <span>${startName}</span>
+            </div>
+            <div class="route-point__line"></div>
+            <div class="route-point">
+                <span class="route-point__marker route-point__marker--end">●</span>
+                <span>${endName}</span>
+            </div>
+        `;
 
-        const routePointsElement = document.getElementById('routePoints');
-        if (routePointsElement) {
-            routePointsElement.innerHTML = `
-                <div class="route-point">
-                    <span class="route-point__marker route-point__marker--start">●</span>
-                    <span class="route-point__text">${startPointName}</span>
-                </div>
-                <div class="route-point__line"></div>
-                <div class="route-point">
-                    <span class="route-point__marker route-point__marker--end">●</span>
-                    <span class="route-point__text">${endPointName}</span>
-                </div>
-            `;
-        }
+        // Score bars
+        const scores = bestRoute.scores || {};
+        this.renderScoreBars(scores);
 
-        this.pageElements.routeExplanation.textContent = bestRoute.explanation ||
-            moodInfo.description ||
-            'This route was selected based on your mood and environmental factors.';
+        // Explanation
+        document.getElementById('routeExplanation').textContent =
+            bestRoute.explanation || moodData.description || '';
 
-        const routeScores = bestRoute.scores || {};
-        this.drawScoreBars(routeScores);
+        // Reset stars
+        document.querySelectorAll('.star').forEach(s => s.classList.remove('lit'));
 
+        // Draw route on map
         if (bestRoute.coordinates && bestRoute.coordinates.length > 1) {
             MapManager.clearRoutes();
-            MapManager.drawRoute(bestRoute.coordinates, '#1a3a6b', startPointName, endPointName);
+            MapManager.drawRoute(bestRoute.coordinates, '#1a3c2e', startName, endName);
             MapManager.fitToRoute(bestRoute.coordinates);
         }
 
-        this.pageElements.moodSection.classList.add('hidden');
-        this.pageElements.indoorSection.classList.add('hidden');
-        this.pageElements.resultSection.classList.remove('hidden');
-        this.setSheetState('full');
-
-        document.querySelectorAll('.star').forEach(star => star.classList.remove('active'));
+        this.showToast(`${emoji} ${label} mood detected — route found!`);
     },
 
-    drawScoreBars(scores) {
-        const keyMapping = {
-            greenery: 'greenery',
-            quiet: 'quiet',
-            quietness: 'quiet',
-            noise: 'quiet',
-            flat: 'flat',
-            flatness: 'flat',
-            elevation: 'flat',
-            uncrowded: 'uncrowded',
-            crowd: 'uncrowded'
+    // ── Render score bars ────────────────────────────────────────────────
+    renderScoreBars(scores) {
+        const keyMap = {
+            greenery: 'greenery', quiet: 'quiet', quietness: 'quiet',
+            flat: 'flat', flatness: 'flat', uncrowded: 'uncrowded'
         };
+        const metrics = [
+            { label: 'Greenery',  key: 'greenery',  color: '#4a7c59' },
+            { label: 'Quietness', key: 'quiet',      color: '#5b8db8' },
+            { label: 'Flatness',  key: 'flat',       color: '#8e44ad' },
+            { label: 'Seclusion', key: 'uncrowded',  color: '#c17f3e' },
+        ];
 
-        document.querySelectorAll('.score-bar__fill').forEach(bar => {
-            bar.style.width = '0%';
-        });
-        document.querySelectorAll('.score-bar__value').forEach(valueLabel => {
-            valueLabel.textContent = '0%';
-        });
+        const container = document.getElementById('scoreBars');
+        container.innerHTML = metrics.map(m => `
+            <div class="score-row">
+                <div class="score-label">${m.label}</div>
+                <div class="score-track">
+                    <div class="score-fill" style="width:0%;background:${m.color}"
+                         data-target="${Math.round(((scores[m.key] || scores[keyMap[m.key]] || 0) / 10) * 100)}"></div>
+                </div>
+                <div class="score-val">${scores[m.key] || scores[keyMap[m.key]] || 0}</div>
+            </div>
+        `).join('');
 
+        // Animate bars after a short delay
         setTimeout(() => {
-            Object.entries(scores).forEach(([scoreKey, scoreValue]) => {
-                const barIdentifier = keyMapping[scoreKey] || scoreKey;
-                const barFill = document.querySelector(`[data-bar="${barIdentifier}"]`);
-                const barLabel = document.querySelector(`[data-score="${barIdentifier}"]`);
-
-                if (barFill) {
-                    const percentage = Math.round(((scoreValue || 0) / 10) * 100);
-                    barFill.style.width = `${percentage}%`;
-                    if (barLabel) barLabel.textContent = `${percentage}%`;
-                }
+            container.querySelectorAll('.score-fill').forEach(bar => {
+                bar.style.width = bar.dataset.target + '%';
             });
         }, 300);
     },
 
-    displayIndoorAlternatives(responseData) {
-        const weatherInfo = responseData.weather || {};
-        this.pageElements.indoorReason.textContent = responseData.message ||
-            `${weatherInfo.icon || '⛈️'} ${weatherInfo.description || "Weather conditions aren't ideal for walking right now."}`;
+    // ── Display indoor alternatives ──────────────────────────────────────
+    displayIndoorAlternatives(data) {
+        document.getElementById('resultCard').classList.add('hidden');
+        document.getElementById('indoorCard').classList.remove('hidden');
 
-        const alternativesList = this.pageElements.indoorList;
-        alternativesList.innerHTML = '';
+        const weather = data.weather || {};
+        document.getElementById('indoorSubtitle').textContent =
+            `${weather.icon || '⛈️'} ${weather.description || 'Dangerous weather'} — outdoor walking not recommended`;
 
-        const alternatives = responseData.alternatives || [];
-        alternatives.forEach(alternative => {
-            const listItem = document.createElement('li');
-            listItem.className = 'indoor-item';
-            if (typeof alternative === 'string') {
-                listItem.textContent = alternative;
-            } else {
-                listItem.innerHTML = `<span class="indoor-item__icon">${alternative.icon || '🏠'}</span>
-                    <div class="indoor-item__content">
-                        <strong>${alternative.name || 'Indoor activity'}</strong>
-                        <span>${alternative.description || ''}</span>
-                    </div>`;
-            }
-            alternativesList.appendChild(listItem);
-        });
+        const alternatives = data.alternatives || [];
+        document.getElementById('indoorOptions').innerHTML = alternatives.map(item => `
+            <div class="indoor-option">
+                <span style="font-size:1.3rem">${item.icon || '🏠'}</span>
+                <div>
+                    <div style="font-weight:600;font-size:0.85rem">${item.name || ''}</div>
+                    <div style="font-size:0.75rem;color:rgba(245,240,232,0.6);margin-top:2px">${item.description || ''}</div>
+                </div>
+            </div>
+        `).join('');
 
-        this.pageElements.moodSection.classList.add('hidden');
-        this.pageElements.resultSection.classList.add('hidden');
-        this.pageElements.indoorSection.classList.remove('hidden');
-        this.setSheetState('full');
+        this.showToast('⛈️ Dangerous weather — showing indoor alternatives');
     },
 
-    async submitRating(starCount) {
-        document.querySelectorAll('.star').forEach((starElement, index) => {
-            starElement.classList.toggle('active', index < starCount);
+    // ── Star rating ──────────────────────────────────────────────────────
+    async submitRating(stars) {
+        document.querySelectorAll('.star').forEach((s, i) => {
+            s.classList.toggle('lit', i < stars);
         });
 
         if (!this.currentRoute) return;
 
         try {
-            const ratingPayload = {
-                route_id: this.currentRoute.id,
-                rating: starCount,
-                mood: this.selectedMood || 'unknown',
-                weather_condition: this.currentWeather ? this.currentWeather.condition : ''
-            };
-
             const response = await fetch('/api/rate', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(ratingPayload)
+                body: JSON.stringify({
+                    route_id: this.currentRoute.id,
+                    rating: stars,
+                    mood: this.selectedMood || 'unknown',
+                    weather_condition: this.currentWeather ? this.currentWeather.condition : ''
+                })
             });
-
             if (!response.ok) throw new Error('Rating failed');
-
-            this.showToast(`Rated ${starCount} star${starCount > 1 ? 's' : ''} — Thank you! ⭐`);
-        } catch (ratingError) {
-            console.error('Rate error:', ratingError);
-            this.showToast('Rating could not be saved', 'error');
+            this.showToast(`⭐ Thank you! ${stars}/5 stars recorded.`);
+        } catch {
+            this.showToast('Rating could not be saved');
         }
     },
 
-    resetToMoodInput() {
-        this.pageElements.resultSection.classList.add('hidden');
-        this.pageElements.indoorSection.classList.add('hidden');
-        this.pageElements.moodSection.classList.remove('hidden');
-        this.setSheetState('half');
-        MapManager.clearRoutes();
-        MapManager.resetToUOW();
-
-        this.pageElements.moodInput.value = '';
-        this.selectedMood = null;
-        document.querySelectorAll('.mood-pill').forEach(pill => pill.classList.remove('active'));
-    },
-
-    showLoading(message) {
-        this.isLoading = true;
-        this.pageElements.loadingText.textContent = message || 'Loading...';
-
-        document.querySelectorAll('.loading-step').forEach(step => {
-            step.classList.remove('active', 'done');
-        });
-        document.querySelector('.loading-step[data-step="1"]').classList.add('active');
-
-        this.pageElements.loadingOverlay.classList.remove('hidden');
-    },
-
-    hideLoading() {
-        this.isLoading = false;
-        this.pageElements.loadingOverlay.classList.add('hidden');
-    },
-
-    showToast(message, type = 'success') {
-        const toastElement = this.pageElements.toast;
-        this.pageElements.toastMessage.textContent = message;
-
-        toastElement.classList.remove('hidden', 'toast--success', 'toast--error');
-        toastElement.classList.add(`toast--${type}`, 'show');
-
-        clearTimeout(this._toastTimeout);
-        this._toastTimeout = setTimeout(() => {
-            toastElement.classList.remove('show');
-            setTimeout(() => toastElement.classList.add('hidden'), 300);
-        }, 3000);
-    },
-
+    // ── Geocode address ──────────────────────────────────────────────────
     async geocodeAddress(address) {
         if (!address || address.length < 3) return;
 
-        const coordinateMatch = address.match(/^(-?\d+\.?\d*),\s*(-?\d+\.?\d*)$/);
-        if (coordinateMatch) {
-            const parsedLat = parseFloat(coordinateMatch[1]);
-            const parsedLng = parseFloat(coordinateMatch[2]);
-            this.currentLocation.lat = parsedLat;
-            this.currentLocation.lng = parsedLng;
-            MapManager.setView(parsedLat, parsedLng);
-            MapManager.addUserMarker(parsedLat, parsedLng);
-            this.loadWeather(parsedLat, parsedLng);
+        // Check if it's already coordinates
+        const coordMatch = address.match(/^(-?\d+\.?\d*),\s*(-?\d+\.?\d*)$/);
+        if (coordMatch) {
+            const lat = parseFloat(coordMatch[1]);
+            const lng = parseFloat(coordMatch[2]);
+            this.currentLocation = { lat, lng };
+            MapManager.setView(lat, lng);
+            MapManager.addUserMarker(lat, lng);
+            this.loadWeather(lat, lng);
             return;
         }
 
         try {
-            const encodedAddress = encodeURIComponent(address);
+            const encoded = encodeURIComponent(address);
             const response = await fetch(
-                `https://nominatim.openstreetmap.org/search?format=json&q=${encodedAddress}&limit=1`,
+                `https://nominatim.openstreetmap.org/search?format=json&q=${encoded}&limit=1`,
                 { headers: { 'Accept': 'application/json' } }
             );
-
             if (!response.ok) throw new Error('Geocoding failed');
+            const results = await response.json();
+            if (results.length === 0) { this.showToast('Location not found'); return; }
 
-            const searchResults = await response.json();
-            if (searchResults.length === 0) {
-                this.showToast('Location not found', 'error');
-                return;
-            }
-
-            const foundLatitude = parseFloat(searchResults[0].lat);
-            const foundLongitude = parseFloat(searchResults[0].lon);
-
-            this.currentLocation.lat = foundLatitude;
-            this.currentLocation.lng = foundLongitude;
-            this.pageElements.locationInput.value = searchResults[0].display_name.split(',').slice(0, 2).join(',');
-
-            MapManager.setView(foundLatitude, foundLongitude);
-            MapManager.addUserMarker(foundLatitude, foundLongitude);
-            this.loadWeather(foundLatitude, foundLongitude);
+            const lat = parseFloat(results[0].lat);
+            const lng = parseFloat(results[0].lon);
+            this.currentLocation = { lat, lng };
+            document.getElementById('locationInput').value =
+                results[0].display_name.split(',').slice(0, 2).join(',');
+            MapManager.setView(lat, lng);
+            MapManager.addUserMarker(lat, lng);
+            this.loadWeather(lat, lng);
             this.showToast('Location set ✓');
-        } catch (geocodeError) {
-            console.error('Geocode error:', geocodeError);
-            this.showToast('Could not find that location', 'error');
+        } catch {
+            this.showToast('Could not find that location');
         }
     },
 
-    sanitizeInput(input) {
-        if (!input) return '';
-        const withoutHtml = input.replace(/<[^>]*>/g, '');
-        return withoutHtml.substring(0, 300).trim();
+    // ── Loading overlay ──────────────────────────────────────────────────
+    showLoading(text) {
+        this.isLoading = true;
+        document.getElementById('loadingText').textContent = text || 'Loading...';
+        document.getElementById('loadingOverlay').classList.remove('hidden');
     },
 
-    delay(milliseconds) {
-        return new Promise(resolve => setTimeout(resolve, milliseconds));
-    }
+    hideLoading() {
+        this.isLoading = false;
+        document.getElementById('loadingOverlay').classList.add('hidden');
+    },
+
+    // ── Toast ────────────────────────────────────────────────────────────
+    showToast(message) {
+        const toast = document.getElementById('toast');
+        toast.textContent = message;
+        toast.classList.add('show');
+        clearTimeout(this._toastTimer);
+        this._toastTimer = setTimeout(() => toast.classList.remove('show'), 3000);
+    },
+
+    // ── Input sanitization ───────────────────────────────────────────────
+    sanitizeInput(input) {
+        if (!input) return '';
+        return input.replace(/<[^>]*>/g, '').substring(0, 300).trim();
+    },
+
+    // ── Utility ──────────────────────────────────────────────────────────
+    delay(ms) { return new Promise(r => setTimeout(r, ms)); }
 };
 
 document.addEventListener('DOMContentLoaded', () => MoodRouteApp.start());
