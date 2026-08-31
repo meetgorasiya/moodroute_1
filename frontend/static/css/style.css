@@ -677,3 +677,60 @@ body {
   font-size: 0.7rem;
   backdrop-filter: blur(4px);
 }
+
+/* ── COLLAPSE / EXPAND HINT on result & indoor boxes (all screens) ── */
+#resultBox.minimised .chat-box__handle::after,
+#indoorBox.minimised .chat-box__handle::after {
+  content: ' ⊕';
+  font-size: 1rem;
+  color: rgba(168,213,181,0.8);
+  margin-left: auto;
+  font-weight: 400;
+}
+
+#resultBox:not(.minimised) .chat-box__handle::after,
+#indoorBox:not(.minimised) .chat-box__handle::after {
+  content: ' ⊖';
+  font-size: 1rem;
+  color: rgba(168,213,181,0.6);
+  margin-left: auto;
+  font-weight: 400;
+}
+
+/* ── MOBILE: result box starts minimised ────────────────── */
+/* On mobile, the result box body is hidden by default.      */
+/* User taps the handle to toggle expand/collapse.           */
+@media (max-width: 768px) {
+  /* When minimised class is present, hide the body */
+  .chat-box.minimised .chat-box__body {
+    display: none;
+  }
+
+  /* On mobile, fix result box at bottom so map is visible above it */
+  #resultBox:not(.hidden),
+  #indoorBox:not(.hidden) {
+    bottom: 38px !important;
+    top: auto !important;
+    left: 10px !important;
+    right: 10px !important;
+    width: auto !important;
+    max-width: 100% !important;
+  }
+
+  /* Input box also full width on mobile */
+  #inputBox:not(.hidden) {
+    bottom: 38px !important;
+    top: auto !important;
+    left: 10px !important;
+    right: 10px !important;
+    width: auto !important;
+    max-width: 100% !important;
+  }
+}
+
+/* ── DESKTOP: collapse/expand also works ────────────────── */
+@media (min-width: 769px) {
+  .chat-box.minimised .chat-box__body {
+    display: none;
+  }
+}

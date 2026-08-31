@@ -20,8 +20,31 @@ const MoodRouteApp = {
         this.makeDraggable('inputBox',   'inputBoxHandle');
         this.makeDraggable('resultBox',  'resultBoxHandle');
         this.makeDraggable('indoorBox',  'indoorBoxHandle');
+        this.setupMobileToggle('resultBox',  'resultBoxHandle');
+        this.setupMobileToggle('indoorBox',  'indoorBoxHandle');
         this.loadWeather(this.currentLocation.lat, this.currentLocation.lng);
         MapManager.addUserMarker(this.currentLocation.lat, this.currentLocation.lng);
+    },
+
+    // ── Detect mobile ────────────────────────────────────────────────────
+    isMobile() {
+        return window.innerWidth <= 768;
+    },
+
+    // ── Tap handle to expand / collapse (not triggered by drag) ──────────
+    setupMobileToggle(boxId, handleId) {
+        const handle = document.getElementById(handleId);
+        if (!handle) return;
+        // The click fires after mouseup. We check _wasDragging flag set by
+        // makeDraggable to skip the toggle if the user was dragging.
+        handle.addEventListener('click', () => {
+            if (handle._wasDragging) {
+                handle._wasDragging = false;
+                return;  // ignore click that ended a drag
+            }
+            const box = document.getElementById(boxId);
+            if (box) box.classList.toggle('minimised');
+        });
     },
 
     // ── Make any box draggable ───────────────────────────────────────────
@@ -31,11 +54,13 @@ const MoodRouteApp = {
         if (!box || !handle) return;
 
         let dragging = false;
+        let movedDistance = 0;
         let startMouseX = 0, startMouseY = 0;
         let startLeft = 0, startTop = 0;
 
         const onStart = (e) => {
             dragging = true;
+            movedDistance = 0;
             const cx = e.touches ? e.touches[0].clientX : e.clientX;
             const cy = e.touches ? e.touches[0].clientY : e.clientY;
             const rect = box.getBoundingClientRect();
@@ -58,14 +83,26 @@ const MoodRouteApp = {
             const cx = e.touches ? e.touches[0].clientX : e.clientX;
             const cy = e.touches ? e.touches[0].clientY : e.clientY;
 
-            const newLeft = Math.max(0, Math.min(window.innerWidth  - box.offsetWidth,  startLeft + cx - startMouseX));
-            const newTop  = Math.max(87, Math.min(window.innerHeight - box.offsetHeight - 38, startTop  + cy - startMouseY));
+            const dx = cx - startMouseX;
+            const dy = cy - startMouseY;
+            movedDistance = Math.sqrt(dx * dx + dy * dy);
+
+            const newLeft = Math.max(0, Math.min(window.innerWidth  - box.offsetWidth,  startLeft + dx));
+            const newTop  = Math.max(87, Math.min(window.innerHeight - box.offsetHeight - 38, startTop  + dy));
 
             box.style.left = `${newLeft}px`;
             box.style.top  = `${newTop}px`;
         };
 
-        const onEnd = () => { dragging = false; };
+        const onEnd = () => {
+            if (!dragging) return;
+            dragging = false;
+            // If the user moved more than 5px, flag it so the click handler
+            // knows to skip the toggle (the click fires right after mouseup)
+            if (movedDistance > 5) {
+                handle._wasDragging = true;
+            }
+        };
 
         handle.addEventListener('touchstart',  onStart, { passive: false });
         document.addEventListener('touchmove',  onMove,  { passive: true });
@@ -317,6 +354,14 @@ const MoodRouteApp = {
         inputBox.classList.add('hidden');
         resultBox.classList.remove('hidden');
 
+        // On mobile: start minimised so the map route is visible immediately.
+        // User taps the handle to expand the result details.
+        if (this.isMobile()) {
+            resultBox.classList.add('minimised');
+        } else {
+            resultBox.classList.remove('minimised');
+        }
+
         this.showToast(`${emoji} ${label} detected — route found!`);
     },
 
@@ -346,6 +391,13 @@ const MoodRouteApp = {
         inputBox.classList.add('hidden');
         indoorBox.classList.remove('hidden');
 
+        // On mobile: start minimised so map is visible
+        if (this.isMobile()) {
+            indoorBox.classList.add('minimised');
+        } else {
+            indoorBox.classList.remove('minimised');
+        }
+
         this.showToast('⛈️ Dangerous weather — indoor alternatives shown');
     },
 
@@ -365,6 +417,9 @@ const MoodRouteApp = {
         resultBox.classList.add('hidden');
         indoorBox.classList.add('hidden');
         inputBox.classList.remove('hidden');
+        // Clear any minimised state for next time
+        resultBox.classList.remove('minimised');
+        indoorBox.classList.remove('minimised');
 
         MapManager.clearRoutes();
         MapManager.resetToUOW();
