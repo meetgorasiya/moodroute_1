@@ -502,7 +502,7 @@ body {
   box-shadow: 0 2px 10px rgba(0,0,0,0.2) !important;
   border-radius: 10px !important;
   overflow: hidden;
-  margin-top: 70px !important;
+  margin-top: 100px !important;
 }
 
 .leaflet-control-zoom-in,
@@ -678,34 +678,36 @@ body {
   backdrop-filter: blur(4px);
 }
 
-/* ── COLLAPSE / EXPAND HINT on result & indoor boxes (all screens) ── */
-#resultBox.minimised .chat-box__handle::after,
-#indoorBox.minimised .chat-box__handle::after {
-  content: ' ⊕';
-  font-size: 1rem;
-  color: rgba(168,213,181,0.8);
+/* ── COLLAPSE / EXPAND ARROWS on ALL boxes ───────────────── */
+/* Shows a chevron arrow at the right of every box handle.   */
+/* ▼ = currently expanded (click to collapse)               */
+/* ▲ = currently collapsed (click to expand)                */
+
+.chat-box.minimised .chat-box__handle::after {
+  content: '▲';
+  font-size: 1.1rem;
+  color: rgba(168,213,181,0.85);
   margin-left: auto;
-  font-weight: 400;
+  font-weight: 700;
+  line-height: 1;
 }
 
-#resultBox:not(.minimised) .chat-box__handle::after,
-#indoorBox:not(.minimised) .chat-box__handle::after {
-  content: ' ⊖';
-  font-size: 1rem;
-  color: rgba(168,213,181,0.6);
+.chat-box:not(.minimised) .chat-box__handle::after {
+  content: '▼';
+  font-size: 1.1rem;
+  color: rgba(168,213,181,0.65);
   margin-left: auto;
-  font-weight: 400;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* Minimised: hide the body on ALL screen sizes */
+.chat-box.minimised .chat-box__body {
+  display: none;
 }
 
 /* ── MOBILE: result box starts minimised ────────────────── */
-/* On mobile, the result box body is hidden by default.      */
-/* User taps the handle to toggle expand/collapse.           */
 @media (max-width: 768px) {
-  /* When minimised class is present, hide the body */
-  .chat-box.minimised .chat-box__body {
-    display: none;
-  }
-
   /* On mobile, fix result box at bottom so map is visible above it */
   #resultBox:not(.hidden),
   #indoorBox:not(.hidden) {
@@ -730,7 +732,51 @@ body {
 
 /* ── DESKTOP: collapse/expand also works ────────────────── */
 @media (min-width: 769px) {
-  .chat-box.minimised .chat-box__body {
+  /* body-hide handled by universal rule above */
+}
+
+/* ── MOBILE HEADER: marquee / news ticker ────────────────── */
+/* On screens ≤ 600px the 3-column layout is replaced by a
+   single scrolling ticker that moves right → left.           */
+@media (max-width: 600px) {
+
+  /* Switch header to single-row overflow container */
+  .site-header {
+    overflow: hidden;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    height: 87px;
+    position: fixed;
+  }
+
+  /* Hide the 3 desktop columns */
+  .header-left,
+  .header-centre,
+  .header-right {
     display: none;
   }
+
+  /* Show the ticker strip */
+  .header-ticker {
+    display: flex !important;
+    white-space: nowrap;
+    animation: header-scroll 22s linear infinite;
+    font-family: 'DM Serif Display', serif;
+    font-size: 1.1rem;
+    color: var(--cream);
+    align-items: center;
+    gap: 0;
+    will-change: transform;
+  }
+
+  @keyframes header-scroll {
+    0%   { transform: translateX(0); }
+    100% { transform: translateX(-50%); }
+  }
+}
+
+/* Ticker hidden on desktop */
+.header-ticker {
+  display: none;
 }

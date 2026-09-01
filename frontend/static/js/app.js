@@ -20,8 +20,9 @@ const MoodRouteApp = {
         this.makeDraggable('inputBox',   'inputBoxHandle');
         this.makeDraggable('resultBox',  'resultBoxHandle');
         this.makeDraggable('indoorBox',  'indoorBoxHandle');
-        this.setupMobileToggle('resultBox',  'resultBoxHandle');
-        this.setupMobileToggle('indoorBox',  'indoorBoxHandle');
+        this.setupToggle('inputBox',  'inputBoxHandle');
+        this.setupToggle('resultBox', 'resultBoxHandle');
+        this.setupToggle('indoorBox', 'indoorBoxHandle');
         this.loadWeather(this.currentLocation.lat, this.currentLocation.lng);
         MapManager.addUserMarker(this.currentLocation.lat, this.currentLocation.lng);
     },
@@ -31,20 +32,33 @@ const MoodRouteApp = {
         return window.innerWidth <= 768;
     },
 
-    // ── Tap handle to expand / collapse (not triggered by drag) ──────────
-    setupMobileToggle(boxId, handleId) {
+    // ── Toggle expand / collapse on handle tap or click ──────────────────
+    // Works on both desktop (mouse) and mobile (touch).
+    // Skipped if the user was dragging (movedDistance > 5px).
+    setupToggle(boxId, handleId) {
         const handle = document.getElementById(handleId);
         if (!handle) return;
-        // The click fires after mouseup. We check _wasDragging flag set by
-        // makeDraggable to skip the toggle if the user was dragging.
+
+        // Mouse click (desktop)
         handle.addEventListener('click', () => {
             if (handle._wasDragging) {
                 handle._wasDragging = false;
-                return;  // ignore click that ended a drag
+                return;
             }
             const box = document.getElementById(boxId);
             if (box) box.classList.toggle('minimised');
         });
+
+        // Touch end (mobile) — more reliable than click on touch devices
+        handle.addEventListener('touchend', (e) => {
+            if (handle._wasDragging) {
+                handle._wasDragging = false;
+                return;
+            }
+            e.preventDefault(); // prevent ghost click
+            const box = document.getElementById(boxId);
+            if (box) box.classList.toggle('minimised');
+        }, { passive: false });
     },
 
     // ── Make any box draggable ───────────────────────────────────────────
