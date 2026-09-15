@@ -29,6 +29,7 @@ def create_app():
             'style-src':   ["'self'", "'unsafe-inline'", 'fonts.googleapis.com', 'unpkg.com'],
             'font-src':    ["'self'", 'fonts.gstatic.com'],
             'img-src':     ["'self'", 'data:', '*.tile.openstreetmap.org',
+                            '*.tile.openstreetmap.fr',
                             'nominatim.openstreetmap.org'],
             'connect-src': ["'self'",
                             'https://nominatim.openstreetmap.org',
